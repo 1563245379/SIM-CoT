@@ -24,7 +24,7 @@ load_model_path: ./ckpts/gsm_coconut_simcot/checkpoint_30
 
 wandb: False
 seed: 0
-resume: 3
+resume: 20
 bf16: False
 
 # data
