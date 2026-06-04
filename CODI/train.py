@@ -266,8 +266,7 @@ def train():
             operators = ["+", "-", "*", "/"]
 
             token_nums = []
-            # import pdb; pdb.set_trace()
-            raw_data = read_json('/mnt/shared-storage-user/weixilin/MLLM/coconut/data/gsm_train_clean.json')            
+            raw_data = list(raw_data) if raw_data is not None else []
             for num_iter, example in tqdm(enumerate(raw_data)):
                 if 'cot' not in example: 
                     example['cot'] = example['steps']
@@ -399,7 +398,7 @@ def train():
         logging.warning("Downloading Data")
         if "icot" in data_args.data_name:
             # dataset = load_dataset("zen-E/GSM8k-Aug")["train"]
-            dataset = None
+            dataset = load_dataset("zen-E/GSM8k-Aug", data_files="gsm8k_aug_train.json", split="train")
             train_dataset = SupervisedDataset(data_name=data_args.data_name, raw_data=dataset, tokenizer=tokenizer, bot=model.bot_id, eot=model.eot_id)
             data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
             return dict(train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator)
@@ -432,7 +431,7 @@ def train():
     )
 
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
-    trainer = CustomTrainer(model=model, tokenizer=tokenizer, args=training_args, **data_module)
+    trainer = CustomTrainer(model=model, processing_class=tokenizer, args=training_args, **data_module)
     trainer.train()
 
     # to avoid the error of saving the model

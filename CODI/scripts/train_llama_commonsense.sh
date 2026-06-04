@@ -23,8 +23,7 @@ python train.py \
 	--max_grad_norm 2.0 \
 	--lora_r 128 --lora_alpha 32 --lora_init \
 	--save_strategy "no" \
-	  --save_safetensors False \
-	--save_total_limit 1 \
+	  --save_total_limit 1 \
 	--weight_decay 0.1 \
 	--warmup_ratio 0.03 \
 	--lr_scheduler_type "cosine" \

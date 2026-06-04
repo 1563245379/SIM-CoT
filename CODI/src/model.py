@@ -280,20 +280,16 @@ class CODI(torch.nn.Module):
         if model_args.full_precision:
             self.codi = model_wrapper_class.from_pretrained(
                     self.model_name,
-                    torch_dtype=(
+                    dtype=(
                         torch.float16 if training_args.bf16 is False else torch.bfloat16
                     ),
-                    use_flash_attention_2=False,
-                    resume_download=True,
                 )
         else:
             self.codi = model_wrapper_class.from_pretrained(
                     self.model_name,
-                    torch_dtype=(
+                    dtype=(
                         torch.float16 if training_args.bf16 is False else torch.bfloat16
                     ),
-                    use_flash_attention_2=False,
-                    resume_download=True,
                     quantization_config=transformers.BitsAndBytesConfig(
                         load_in_4bit=True,
                         bnb_4bit_compute_dtype=torch.bfloat16,
@@ -306,11 +302,9 @@ class CODI(torch.nn.Module):
             if model_args.decoder_path:
                 self.decoder = model_wrapper_class.from_pretrained(
                     model_args.decoder_path,
-                    torch_dtype=(
+                    dtype=(
                         torch.float16 if training_args.bf16 is False else torch.bfloat16
                     ),
-                    use_flash_attention_2=False,
-                    resume_download=True,
                 )
                 if self.codi.lm_head.in_features == self.decoder.lm_head.in_features:
                     self.pj_in = nn.Identity()
@@ -326,12 +320,10 @@ class CODI(torch.nn.Module):
             else:
                 self.decoder = model_wrapper_class.from_pretrained(
                         self.model_name,
-                        torch_dtype=(
+                        dtype=(
                             torch.float16 if training_args.bf16 is False else torch.bfloat16
                         ),
-                        use_flash_attention_2=False,
-                        resume_download=True,
-                    )
+                )
         
         # import pdb; pdb.set_trace()
 

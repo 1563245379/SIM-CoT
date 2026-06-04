@@ -11,7 +11,7 @@ python train.py \
   	--expt_name gsm8k_gpt_latent_decoder-2 \
 	--logging_dir "$SAVE_DIR/logs"\
 	--logging_steps 10 \
-	--model_name_or_path /mnt/shared-storage-user/mllm/shared/weixilin/gpt2 \
+	--model_name_or_path gpt2 \
 	--data_name icot \
 	--seed 11 \
 	--model_max_length 512 \
@@ -24,7 +24,6 @@ python train.py \
 	--use_lora True \
 	--lora_r 128 --lora_alpha 32 --lora_init \
 	--save_strategy "no" \
-	--save_safetensors False \
 	--save_total_limit 1 \
 	--weight_decay 0.1 \
 	--warmup_ratio 0.03 \
