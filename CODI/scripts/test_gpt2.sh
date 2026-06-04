@@ -1,3 +1,5 @@
+export HF_HOME=/workspace/cache
+
 python test.py \
 	--data_name "gsm8k" \
 	--output_dir "$SAVE_DIR" \

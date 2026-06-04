@@ -1,3 +1,5 @@
+export HF_HOME=/workspace/cache
+
 SAVE_DIR=/mnt/shared-storage-user/weixilin/MLLM/coconut/codi/outputs
 
 mkdir -p "$SAVE_DIR"

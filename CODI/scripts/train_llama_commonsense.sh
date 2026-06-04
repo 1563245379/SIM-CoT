@@ -1,3 +1,5 @@
+export HF_HOME=/workspace/cache
+
 SAVE_DIR=~/codi_ckpt/llama_commonsense
 
 mkdir -p "$SAVE_DIR"

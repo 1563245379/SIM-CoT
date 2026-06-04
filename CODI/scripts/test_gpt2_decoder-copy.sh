@@ -1,3 +1,5 @@
+export HF_HOME=/workspace/cache
+
 # gsm8k, gsm-hard, multi-arith, svamp
 python test.py \
 	--data_name "gsm8k" \

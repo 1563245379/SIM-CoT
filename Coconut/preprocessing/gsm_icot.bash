@@ -1,5 +1,7 @@
 #!/bin/bash
 
+export HF_HOME=/workspace/cache
+
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 

@@ -1,3 +1,5 @@
+export HF_HOME=/workspace/cache
+
 SAVE_DIR=/scratch/prj/inf_multimodal_qa/scratch_tmp/efficient_cot/icae/codi2/gpt_codi_lora_nl
 
 mkdir -p "$SAVE_DIR"

@@ -32,10 +32,57 @@ import itertools
 import os, sys
 import yaml
 import json
+import shutil
 import gc
 import argparse
 import functools
 from utils import Config, set_seed
+
+CKPT_META_FILE = "ckpt_meta.json"
+
+def load_checkpoint_meta(save_dir):
+    meta_path = os.path.join(save_dir, CKPT_META_FILE)
+    if os.path.exists(meta_path):
+        with open(meta_path, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_checkpoint_meta(save_dir, meta):
+    meta_path = os.path.join(save_dir, CKPT_META_FILE)
+    with open(meta_path, "w") as f:
+        json.dump(meta, f)
+
+def cleanup_checkpoints(save_dir, keep_latest=1, keep_best=3):
+    meta = load_checkpoint_meta(save_dir)
+    checkpoints = [
+        f for f in os.listdir(save_dir)
+        if f.startswith("checkpoint_") and f[len("checkpoint_"):].isdigit()
+    ]
+    if len(checkpoints) <= keep_latest + keep_best:
+        return
+
+    epoch_numbers = sorted(int(f[len("checkpoint_"):]) for f in checkpoints)
+    latest_epochs = set(epoch_numbers[-keep_latest:])
+
+    meta_with_acc = {int(e): acc for e, acc in meta.items() if isinstance(acc, (int, float))}
+    best_epochs = set()
+    if meta_with_acc:
+        best_epochs = set(
+            sorted(meta_with_acc, key=meta_with_acc.get, reverse=True)[:keep_best]
+        )
+
+    keep_epochs = latest_epochs | best_epochs
+
+    for epoch_num in epoch_numbers:
+        if epoch_num not in keep_epochs:
+            ckpt_path = os.path.join(save_dir, f"checkpoint_{epoch_num}")
+            if os.path.isfile(ckpt_path):
+                os.remove(ckpt_path)
+            elif os.path.isdir(ckpt_path):
+                shutil.rmtree(ckpt_path)
+            meta.pop(str(epoch_num), None)
+
+    save_checkpoint_meta(save_dir, meta)
 def check_requires_grad(model):
     for name, param in model.named_parameters():
         print(name)
@@ -87,21 +134,18 @@ def main():
         # it means the previous run was preempted and the program is restarted.
         # need to find the latest checkpoint and resume from that.
 
-        if rank == 0:
-            print(
-                f"Warning: found previous run and gonna resume from that. the inputted `resume` argument is ignored!"
-            )
+        checkpoints = [f for f in cur_ckpts if f.startswith("checkpoint_") and f[len("checkpoint_"):].isdigit()]
+        if checkpoints:
+            if rank == 0:
+                print(
+                    f"Warning: found previous run and gonna resume from that. the inputted `resume` argument is ignored!"
+                )
 
-        checkpoints = [f for f in cur_ckpts if f.startswith("checkpoint_")]
-        checkpoints.sort(key=lambda x: int(x.split("_")[1]))
-
-        # Get the last item in the sorted list
-        latest_checkpoint = checkpoints[-1] if checkpoints else None
-        configs.resume = int(latest_checkpoint.split("_")[1])
-        load_dir = os.path.join(configs.save_path, configs.name, latest_checkpoint)
-
-        configs.load_model_path = load_dir
-        print(f"Loading from previous run epoch_{configs.resume}!")
+            checkpoints.sort(key=lambda x: int(x[len("checkpoint_"):]))
+            latest_checkpoint = checkpoints[-1]
+            configs.resume = int(latest_checkpoint[len("checkpoint_"):])
+            configs.load_model_path = os.path.join(configs.save_path, configs.name, latest_checkpoint)
+            print(f"Loading from previous run epoch_{configs.resume}!")
 
     elif configs.resume != 0:
         # by setting `resume`, we can skip a few epoches at the beginning.
@@ -261,7 +305,7 @@ def main():
             weight_decay=configs.weight_decay,
         )
 
-    best_acc = 0
+    current_acc = 0.0
 
     # collator = MyCollator(tokenizer, latent_id=latent_id, label_pad_token_id=-100)
     collator = MyCollator(tokenizer, latent_id=latent_id, label_pad_token_id=-100)
@@ -417,23 +461,6 @@ def main():
             pbar.close()
             dist.barrier()
 
-            if (
-                not configs.save_only_improve
-                and not configs.debug
-                and not configs.only_eval
-            ):
-                states = parallel_model.state_dict()
-                if rank == 0:
-                    torch.save(
-                        states, os.path.join(save_dir, f"checkpoint_{epoch + 1}")
-                    )
-                    print("saving model.")
-
-                dist.barrier()
-                del states
-                gc.collect()
-                torch.cuda.empty_cache()
-
             # val loss
             total_loss = 0
 
@@ -471,84 +498,91 @@ def main():
             torch.tensor(0, device=local_rank),
             torch.tensor(0, device=local_rank),
         )
-        if hasattr(configs, "train_or_eval") and configs.train_or_eval == 'eval':
-            with torch.no_grad():
-                parallel_model.module.eval()
-                for idx, batch in enumerate(valid_gen_dataloader):
-                    test_idx = batch["idx"][0]
+        with torch.no_grad():
+            parallel_model.module.eval()
+            for idx, batch in enumerate(valid_gen_dataloader):
+                test_idx = batch["idx"][0]
 
-                    batch = {
-                        k: v.to(rank)
-                        for k, v in batch.items()
-                        if v != None and k not in ["idx", "position_ids"]
-                    }
-                    # https://github.com/huggingface/transformers/issues/32492
+                batch = {
+                    k: v.to(rank)
+                    for k, v in batch.items()
+                    if v != None and k not in ["idx", "position_ids"]
+                }
+                # https://github.com/huggingface/transformers/issues/32492
 
-                    assert len(batch["input_ids"]) == 1
-                    answer = answers_val[test_idx.cpu().item()]
-                    answer_cot = cot_val[test_idx.cpu().item()]
-                    question = question_val[test_idx.cpu().item()]
+                assert len(batch["input_ids"]) == 1
+                answer = answers_val[test_idx.cpu().item()]
+                answer_cot = cot_val[test_idx.cpu().item()]
+                question = question_val[test_idx.cpu().item()]
 
-                    total += 1
+                total += 1
 
-                    # synced_gpus=True in FSDP mode, as we need to keep # forward pass the same on each device
-                    outputs = parallel_model.module.generate(
-                        **batch,
-                        max_new_tokens=max_new_tokens,
-                        synced_gpus=not configs.only_eval,
+                # synced_gpus=True in FSDP mode, as we need to keep # forward pass the same on each device
+                outputs = parallel_model.module.generate(
+                    **batch,
+                    max_new_tokens=max_new_tokens,
+                    synced_gpus=not configs.only_eval,
+                )
+                
+                text_output = tokenizer.decode(outputs[0], skip_special_tokens=True)
+                answer_output = text_output.split("#")[-1].replace(",", "").strip()
+                cot_output = (
+                    ("\n".join(text_output.split("\n")[1:])).split("#")[0].strip()
+                )
+                if idx < 5 and rank == 0:
+                    # print some examples
+                    print(
+                        f"Question {test_idx}: Answer = '{answer}' CoT = '{answer_cot}'"
                     )
-                    
-                    text_output = tokenizer.decode(outputs[0], skip_special_tokens=True)
-                    answer_output = text_output.split("#")[-1].replace(",", "").strip()
-                    cot_output = (
-                        ("\n".join(text_output.split("\n")[1:])).split("#")[0].strip()
-                    )
-                    if idx < 5 and rank == 0:
-                        # print some examples
-                        print(
-                            f"Question {test_idx}: Answer = '{answer}' CoT = '{answer_cot}'"
-                        )
-                        print(f"Full output: '{tokenizer.decode(outputs[0])}'")
-                        print(f"Extracted Output: '{answer_output}'")
+                    print(f"Full output: '{tokenizer.decode(outputs[0])}'")
+                    print(f"Extracted Output: '{answer_output}'")
 
-                    cor += answer_output == answer
-                    cor_cot += cot_output == answer_cot
+                cor += answer_output == answer
+                cor_cot += cot_output == answer_cot
 
-                    pbar.update(1)
-                    pbar.set_description(
-                        f"Test accuracy: {round(float(cor.detach().float() / total.detach().float()), 2)}"
-                    )
+                pbar.update(1)
+                pbar.set_description(
+                    f"Test accuracy: {round(float(cor.detach().float() / total.detach().float()), 2)}"
+                )
 
-                pbar.close()
-                print(f"Device {rank}: Cor={cor}, CoT={cor_cot}, Total={total}")
+            pbar.close()
+            print(f"Device {rank}: Cor={cor}, CoT={cor_cot}, Total={total}")
 
-            dist.all_reduce(cor_cot, op=dist.ReduceOp.SUM)
-            dist.all_reduce(cor, op=dist.ReduceOp.SUM)
-            dist.all_reduce(total, op=dist.ReduceOp.SUM)
+        dist.all_reduce(cor_cot, op=dist.ReduceOp.SUM)
+        dist.all_reduce(cor, op=dist.ReduceOp.SUM)
+        dist.all_reduce(total, op=dist.ReduceOp.SUM)
 
-            cor_cot = cor_cot.item()
-            cor = cor.item()
-            total = total.item()
-            if rank == 0:
-                print(f"Accuracy on validation set: {cor} / {total} = {cor/total}")
-                print(f"CoT match on validation set: {cor_cot} / {total} = {cor_cot/total}")
-            sys.stdout.flush()
+        cor_cot = cor_cot.item()
+        cor = cor.item()
+        total = total.item()
+        if rank == 0:
+            print(f"Accuracy on validation set: {cor} / {total} = {cor/total}")
+            print(f"CoT match on validation set: {cor_cot} / {total} = {cor_cot/total}")
+        sys.stdout.flush()
 
-            if wandb_run:
-                wandb_run.log({"eval/acc": cor / total, "eval/cot_em": cor_cot / total})
+        if wandb_run:
+            wandb_run.log({"eval/acc": cor / total, "eval/cot_em": cor_cot / total})
 
-            if configs.only_eval:
-                break
+        current_acc = cor / total
 
-            dist.barrier()
-        else:
+        if configs.only_eval:
+            break
+
+        # Save checkpoint with accuracy tracking and cleanup
+        if not configs.debug:
             states = parallel_model.state_dict()
 
             if rank == 0:
                 torch.save(states, os.path.join(save_dir, f"checkpoint_{epoch + 1}"))
                 print("saving model.")
 
-            best_acc = cor / total
+                ckpt_meta = load_checkpoint_meta(save_dir)
+                ckpt_meta[str(epoch + 1)] = current_acc
+                save_checkpoint_meta(save_dir, ckpt_meta)
+                keep_latest = getattr(configs, 'keep_latest', 1)
+                keep_best = getattr(configs, 'keep_best', 3)
+                cleanup_checkpoints(save_dir, keep_latest=keep_latest, keep_best=keep_best)
+                print(f"Checkpoint saved for epoch {epoch + 1}, accuracy: {current_acc:.4f}")
 
             dist.barrier()
             del states

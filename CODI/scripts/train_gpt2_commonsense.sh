@@ -1,3 +1,5 @@
+export HF_HOME=/workspace/cache
+
 SAVE_DIR=/ephemeral/gpt2_commonsense
 
 mkdir -p "$SAVE_DIR"

@@ -1,3 +1,5 @@
+export HF_HOME=/workspace/cache
+
 python probe_latent_token.py \
 	--data_name "zen-E/GSM8k-Aug" \
 	--output_dir "$SAVE_DIR" \

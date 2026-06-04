@@ -1,3 +1,5 @@
+export HF_HOME=/workspace/cache
+
 SAVE_DIR=/ephemeral/codi_llama1b_full
 
 mkdir -p "$SAVE_DIR"
